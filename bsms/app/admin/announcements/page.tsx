@@ -17,7 +17,7 @@ export default function AdminAnnouncements() {
   const handleSave = () => {
     if (!form.title || !form.content) { toast('Fill all fields', 'error'); return; }
     addAnnouncement({ ...form, authorId: user!.id, authorName: user!.name });
-    toast('Announcement sent to all users');
+    toast('Announcement sent to the dashboard and email recipients');
     setShowModal(false);
     setForm({ title: '', content: '', targetRole: 'all' });
   };

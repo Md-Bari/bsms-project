@@ -3,10 +3,15 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
+use App\Mail\AnnouncementMail;
 use App\Models\Announcement;
+use App\Models\Notification;
+use App\Models\User;
 use App\Support\FrontendData;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 class AnnouncementController extends Controller
 {
@@ -35,6 +40,39 @@ class AnnouncementController extends Controller
             'content' => $data['content'],
             'target_role' => $data['targetRole'],
         ])->load(['author', 'readers']);
+
+        $recipients = User::query()
+            ->where('building_id', $request->user()->building_id)
+            ->when($data['targetRole'] !== 'all', fn ($query) => $query->where('role', $data['targetRole']))
+            ->get();
+
+        $notifications = $recipients->map(fn (User $recipient) => [
+                'user_id' => $recipient->id,
+                'title' => $announcement->title,
+                'message' => $announcement->content,
+                'type' => 'announcement',
+                'read' => false,
+                'read_at' => null,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ])->all();
+
+        if ($notifications !== []) {
+            Notification::insert($notifications);
+        }
+
+        foreach ($recipients->filter(fn (User $recipient) => filled($recipient->email)) as $recipient) {
+            try {
+                Mail::to($recipient->email)->send(new AnnouncementMail($announcement, $recipient));
+            } catch (\Throwable $exception) {
+                Log::error('Failed to send announcement email.', [
+                    'announcement_id' => $announcement->id,
+                    'recipient_id' => $recipient->id,
+                    'recipient_email' => $recipient->email,
+                    'error' => $exception->getMessage(),
+                ]);
+            }
+        }
 
         return response()->json(FrontendData::announcement($announcement), 201);
     }
