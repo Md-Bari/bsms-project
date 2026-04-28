@@ -27,7 +27,10 @@ interface AppStore {
 
   // Payment actions
   addPayment: (payment: Omit<Payment, 'id'>) => void;
+  createRentPayment: (month: string) => Promise<Payment>;
   updatePaymentStatus: (id: string, status: Payment['status'], method?: Payment['method']) => void;
+  createStripeCheckoutSession: (id: string) => Promise<string>;
+  confirmStripeCheckoutSession: (sessionId: string) => Promise<Payment>;
 
   // Maintenance actions
   addTicket: (ticket: Omit<MaintenanceTicket, 'id' | 'ticketId' | 'createdAt' | 'updatedAt'>) => void;
@@ -61,7 +64,21 @@ type BootstrapPayload = {
 };
 
 const withToken = () => useAuthStore.getState().token;
-const toNumericId = (value?: string | number | null) => value !== undefined && value !== null && value !== '' ? Number(value) : null;
+const toNumericId = (value?: string | number | null) => value !== undefined && value !== null && value !== '' ? Number(value) : undefined;
+
+const applyTenantFlatAssignment = (flats: Flat[], tenant: Tenant, previousFlatId?: string | null) => (
+  flats.map((flat) => {
+    if (previousFlatId && flat.id === previousFlatId && previousFlatId !== tenant.flatId) {
+      return { ...flat, tenantId: undefined, tenantName: undefined, status: 'vacant' as const };
+    }
+
+    if (tenant.flatId && flat.id === tenant.flatId) {
+      return { ...flat, tenantId: tenant.userId, tenantName: tenant.name, status: 'occupied' as const };
+    }
+
+    return flat;
+  })
+);
 
 export const useAppStore = create<AppStore>((set) => ({
   flats: [],
@@ -100,14 +117,34 @@ export const useAppStore = create<AppStore>((set) => ({
   },
   updateFlat: (id, data) => {
     const previous = useAppStore.getState().flats;
-    set(s => ({ flats: s.flats.map(f => f.id === id ? { ...f, ...data } : f) }));
+    const previousTenants = useAppStore.getState().tenants;
+    set(s => {
+      const removesTenant = data.status === 'vacant' || data.status === 'maintenance';
+
+      return {
+        flats: s.flats.map(f => {
+          if (f.id !== id) return f;
+
+          const next = { ...f, ...data };
+          return removesTenant ? { ...next, tenantId: undefined, tenantName: undefined } : next;
+        }),
+        tenants: removesTenant
+          ? s.tenants.map(t => t.flatId === id ? { ...t, flatId: undefined, flatNumber: undefined } : t)
+          : s.tenants,
+      };
+    });
     void apiRequest<Flat>(`/flats/${id}`, {
       method: 'PATCH',
       body: { ...data, ownerId: toNumericId(data.ownerId) },
       token: withToken(),
     })
-      .then(saved => set(s => ({ flats: s.flats.map(item => item.id === id ? saved : item) })))
-      .catch(() => set({ flats: previous }));
+      .then(saved => set(s => ({
+        flats: s.flats.map(item => item.id === id ? saved : item),
+        tenants: saved.status === 'vacant' || saved.status === 'maintenance'
+          ? s.tenants.map(t => t.flatId === id ? { ...t, flatId: undefined, flatNumber: undefined } : t)
+          : s.tenants,
+      })))
+      .catch(() => set({ flats: previous, tenants: previousTenants }));
   },
   deleteFlat: (id) => {
     const previous = useAppStore.getState().flats;
@@ -123,31 +160,23 @@ export const useAppStore = create<AppStore>((set) => ({
     })
       .then(saved => set(s => ({
         tenants: [...s.tenants, saved],
-        flats: s.flats.map(flat => flat.id === saved.flatId ? { ...flat, status: 'occupied', tenantId: saved.userId, tenantName: saved.name } : flat),
+        flats: applyTenantFlatAssignment(s.flats, saved),
       })))
       .catch(() => undefined);
   },
   updateTenant: (id, data) => {
-    const previous = useAppStore.getState();
-    const previousTenant = previous.tenants.find(tenant => tenant.id === id);
-    const nextFlatId = data.flatId !== undefined ? data.flatId : previousTenant?.flatId;
-    const nextTenantName = data.name || previousTenant?.name;
+    const previous = useAppStore.getState().tenants;
+    const previousFlats = useAppStore.getState().flats;
+    const previousFlatId = previous.find(t => t.id === id)?.flatId;
+    set(s => {
+      const tenant = s.tenants.find(t => t.id === id);
+      const optimisticTenant = tenant ? { ...tenant, ...data } : undefined;
 
-    set(s => ({
-      tenants: s.tenants.map(t => t.id === id ? { ...t, ...data } : t),
-      flats: s.flats.map(flat => {
-        if (previousTenant?.flatId && flat.id === previousTenant.flatId && previousTenant.flatId !== nextFlatId) {
-          return { ...flat, status: 'vacant', tenantId: undefined, tenantName: undefined };
-        }
-
-        if (nextFlatId && flat.id === nextFlatId) {
-          return { ...flat, status: 'occupied', tenantId: previousTenant?.userId, tenantName: nextTenantName };
-        }
-
-        return flat;
-      }),
-    }));
-
+      return {
+        tenants: s.tenants.map(t => t.id === id ? { ...t, ...data } : t),
+        flats: optimisticTenant ? applyTenantFlatAssignment(s.flats, optimisticTenant, previousFlatId) : s.flats,
+      };
+    });
     void apiRequest<Tenant>(`/tenants/${id}`, {
       method: 'PATCH',
       body: { ...data, flatId: toNumericId(data.flatId) },
@@ -155,31 +184,21 @@ export const useAppStore = create<AppStore>((set) => ({
     })
       .then(saved => set(s => ({
         tenants: s.tenants.map(item => item.id === id ? saved : item),
-        flats: s.flats.map(flat => {
-          const savedFlatId = saved.flatId || undefined;
-
-          if (previousTenant?.flatId && flat.id === previousTenant.flatId && previousTenant.flatId !== savedFlatId) {
-            return { ...flat, status: 'vacant', tenantId: undefined, tenantName: undefined };
-          }
-
-          if (savedFlatId && flat.id === savedFlatId) {
-            return { ...flat, status: 'occupied', tenantId: saved.userId, tenantName: saved.name };
-          }
-
-          return flat;
-        }),
+        flats: applyTenantFlatAssignment(s.flats, saved, previousFlatId),
       })))
-      .catch(() => set({ tenants: previous.tenants, flats: previous.flats }));
+      .catch(() => set({ tenants: previous, flats: previousFlats }));
   },
   deleteTenant: (id) => {
-    const previous = useAppStore.getState();
-    const tenant = previous.tenants.find(item => item.id === id);
-
-    set(s => ({
-      tenants: s.tenants.filter(t => t.id !== id),
-      flats: s.flats.map(flat => flat.id === tenant?.flatId ? { ...flat, status: 'vacant', tenantId: undefined, tenantName: undefined } : flat),
-    }));
-    void apiRequest(`/tenants/${id}`, { method: 'DELETE', token: withToken() }).catch(() => set({ tenants: previous.tenants, flats: previous.flats }));
+    const previous = useAppStore.getState().tenants;
+    const previousFlats = useAppStore.getState().flats;
+    const deletedTenant = previous.find(t => t.id === id);
+    set(s => ({ tenants: s.tenants.filter(t => t.id !== id) }));
+    void apiRequest(`/tenants/${id}`, { method: 'DELETE', token: withToken() }).catch(() => set({ tenants: previous, flats: previousFlats }));
+    if (deletedTenant?.flatId) {
+      set(s => ({
+        flats: s.flats.map(flat => flat.id === deletedTenant.flatId ? { ...flat, tenantId: undefined, tenantName: undefined, status: 'vacant' } : flat),
+      }));
+    }
   },
 
   addPayment: (payment) => {
@@ -196,6 +215,21 @@ export const useAppStore = create<AppStore>((set) => ({
       .then(saved => set(s => ({ payments: [...s.payments, saved] })))
       .catch(() => undefined);
   },
+  createRentPayment: async (month) => {
+    const payment = await apiRequest<Payment>('/payments/rent-payment', {
+      method: 'POST',
+      body: { month },
+      token: withToken(),
+    });
+
+    set(s => ({
+      payments: s.payments.some(item => item.id === payment.id)
+        ? s.payments.map(item => item.id === payment.id ? payment : item)
+        : [payment, ...s.payments],
+    }));
+
+    return payment;
+  },
   updatePaymentStatus: (id, status, method) => {
     const previous = useAppStore.getState().payments;
     set(s => ({
@@ -204,6 +238,25 @@ export const useAppStore = create<AppStore>((set) => ({
     void apiRequest<Payment>(`/payments/${id}/status`, { method: 'PATCH', body: { status, method }, token: withToken() })
       .then(saved => set(s => ({ payments: s.payments.map(item => item.id === id ? saved : item) })))
       .catch(() => set({ payments: previous }));
+  },
+  createStripeCheckoutSession: async (id) => {
+    const payload = await apiRequest<{ checkoutUrl: string; payment: Payment }>(`/payments/${id}/stripe-checkout`, {
+      method: 'POST',
+      token: withToken(),
+    });
+    set(s => ({ payments: s.payments.map(item => item.id === id ? payload.payment : item) }));
+
+    return payload.checkoutUrl;
+  },
+  confirmStripeCheckoutSession: async (sessionId) => {
+    const payment = await apiRequest<Payment>('/payments/stripe/confirm', {
+      method: 'POST',
+      body: { sessionId },
+      token: withToken(),
+    });
+    set(s => ({ payments: s.payments.map(item => item.id === payment.id ? payment : item) }));
+
+    return payment;
   },
 
   addTicket: (ticket) => {

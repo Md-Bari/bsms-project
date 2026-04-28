@@ -2,7 +2,6 @@
 
 namespace App\Mail;
 
-use App\Models\Announcement;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -10,33 +9,31 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class AnnouncementMail extends Mailable
+class PasswordResetOtpMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public function __construct(
-        public Announcement $announcement,
-        public User $recipient,
-        public ?string $subjectLine = null,
-        public ?string $introLine = null,
+        public User $user,
+        public string $otp,
     ) {}
 
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: $this->subjectLine ?: 'BSMS Announcement: '.$this->announcement->title,
+            subject: 'BSMS Password Reset OTP',
         );
     }
 
     public function content(): Content
     {
         return new Content(
-            view: 'emails.announcement',
+            view: 'emails.password-reset-otp',
             with: [
-                'announcement' => $this->announcement,
-                'recipient' => $this->recipient,
-                'introLine' => $this->introLine,
+                'user' => $this->user,
+                'otp' => $this->otp,
             ],
         );
     }
 }
+

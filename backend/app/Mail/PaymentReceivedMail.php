@@ -2,7 +2,7 @@
 
 namespace App\Mail;
 
-use App\Models\Announcement;
+use App\Models\Payment;
 use App\Models\User;
 use Illuminate\Bus\Queueable;
 use Illuminate\Mail\Mailable;
@@ -10,12 +10,12 @@ use Illuminate\Mail\Mailables\Content;
 use Illuminate\Mail\Mailables\Envelope;
 use Illuminate\Queue\SerializesModels;
 
-class AnnouncementMail extends Mailable
+class PaymentReceivedMail extends Mailable
 {
     use Queueable, SerializesModels;
 
     public function __construct(
-        public Announcement $announcement,
+        public Payment $payment,
         public User $recipient,
         public ?string $subjectLine = null,
         public ?string $introLine = null,
@@ -24,16 +24,16 @@ class AnnouncementMail extends Mailable
     public function envelope(): Envelope
     {
         return new Envelope(
-            subject: $this->subjectLine ?: 'BSMS Announcement: '.$this->announcement->title,
+            subject: $this->subjectLine ?: 'BSMS Payment Received: '.$this->payment->invoice_number,
         );
     }
 
     public function content(): Content
     {
         return new Content(
-            view: 'emails.announcement',
+            view: 'emails.payment-received',
             with: [
-                'announcement' => $this->announcement,
+                'payment' => $this->payment,
                 'recipient' => $this->recipient,
                 'introLine' => $this->introLine,
             ],

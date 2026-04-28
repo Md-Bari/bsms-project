@@ -17,7 +17,7 @@ export default function TenantVisitors() {
   const [form, setForm] = useState({ name: '', phone: '', nid: '', visitDate: '', expectedTime: '', purpose: '' });
 
   const myFlat = flats.find(f => f.tenantId === user?.id);
-  const myVisitors = visitors.filter(v => v.tenantName === user?.name || v.tenantId === user?.id);
+  const myVisitors = visitors.filter((visitor) => visitor.tenantId === user?.id);
 
   const openAdd = () => { setEditVisitor(null); setForm({ name: '', phone: '', nid: '', visitDate: '', expectedTime: '', purpose: '' }); setShowModal(true); };
   const openEdit = (v: Visitor) => { setEditVisitor(v); setForm({ name: v.name, phone: v.phone, nid: v.nid || '', visitDate: v.visitDate || '', expectedTime: v.expectedTime || '', purpose: v.purpose || '' }); setShowModal(true); };

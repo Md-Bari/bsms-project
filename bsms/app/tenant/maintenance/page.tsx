@@ -17,7 +17,7 @@ export default function TenantMaintenance() {
 
   const myFlat = flats.find(f => f.tenantId === user?.id);
   const myTenantProfile = tenants.find(t => t.userId === user?.id);
-  const myTickets = tickets.filter(t => t.tenantName === user?.name);
+  const myTickets = myTenantProfile ? tickets.filter((ticket) => ticket.tenantId === myTenantProfile.id) : tickets;
 
   const handleSubmit = () => {
     if (!form.description.trim()) { toast('Please describe the issue', 'error'); return; }

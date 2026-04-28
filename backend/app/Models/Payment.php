@@ -20,6 +20,9 @@ class Payment extends Model
         'paid_at',
         'invoice_number',
         'recipient',
+        'stripe_checkout_session_id',
+        'stripe_payment_intent_id',
+        'stripe_destination_account_id',
     ];
 
     protected function casts(): array

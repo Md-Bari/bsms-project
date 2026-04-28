@@ -11,7 +11,7 @@ interface AuthStore {
   hasHydrated: boolean;
   setHasHydrated: (value: boolean) => void;
   initialize: () => Promise<void>;
-  updateProfile: (data: { name: string; email: string; phone?: string }) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (data: { name?: string; email?: string; phone?: string; emailNotifications?: boolean }) => Promise<{ success: boolean; error?: string }>;
   login: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   logout: () => void;
 }

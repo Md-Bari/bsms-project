@@ -31,6 +31,7 @@ class FrontendData
             'moveInDate' => $tenantProfile?->move_in_date?->format('Y-m-d'),
             'status' => $tenantProfile ? ($tenantProfile->is_active ? 'active' : 'inactive') : null,
             'isVerified' => $user->is_verified,
+            'emailNotifications' => $user->email_notifications_enabled,
             'createdAt' => $user->created_at?->toISOString(),
         ];
     }
@@ -46,6 +47,8 @@ class FrontendData
             'size' => $flat->size_sqft ? rtrim(rtrim((string) $flat->size_sqft, '0'), '.').' sqft' : '',
             'ownerId' => $flat->owner_id ? (string) $flat->owner_id : null,
             'ownerName' => $flat->owner?->name,
+            'ownerEmail' => $flat->owner?->email,
+            'ownerPhone' => $flat->owner?->phone,
             'tenantId' => $tenantProfile?->user_id ? (string) $tenantProfile->user_id : null,
             'tenantName' => $tenantProfile?->user?->name,
             'status' => $flat->status,

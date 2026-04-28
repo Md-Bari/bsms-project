@@ -8,6 +8,7 @@ use App\Models\User;
 use App\Support\FrontendData;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class FlatController extends Controller
 {
@@ -57,25 +58,44 @@ class FlatController extends Controller
 
     public function update(Request $request, Flat $flat): JsonResponse
     {
-        abort_unless($request->user()->role === 'admin', 403);
+        $user = $request->user();
+        $isAdmin = $user->role === 'admin';
+        $isOwner = $user->role === 'owner' && $flat->owner_id === $user->id;
+
+        abort_unless($isAdmin || $isOwner, 403);
 
         $data = $request->validate([
-            'number' => ['sometimes', 'string', 'max:50'],
-            'floor' => ['sometimes', 'integer', 'min:1'],
-            'size' => ['nullable', 'string', 'max:50'],
-            'ownerId' => ['nullable', 'integer', 'exists:users,id'],
+            'number' => [$isAdmin ? 'sometimes' : 'prohibited', 'string', 'max:50'],
+            'floor' => [$isAdmin ? 'sometimes' : 'prohibited', 'integer', 'min:1'],
+            'size' => [$isAdmin ? 'nullable' : 'prohibited', 'string', 'max:50'],
+            'ownerId' => [$isAdmin ? 'nullable' : 'prohibited', 'integer', 'exists:users,id'],
             'status' => ['sometimes', 'in:vacant,occupied,maintenance'],
-            'monthlyRent' => ['sometimes', 'numeric', 'min:0'],
+            'monthlyRent' => [$isAdmin ? 'sometimes' : 'prohibited', 'numeric', 'min:0'],
         ]);
 
-        $flat->fill([
-            'number' => $data['number'] ?? $flat->number,
-            'floor' => $data['floor'] ?? $flat->floor,
-            'size_sqft' => array_key_exists('size', $data) ? $this->extractSize($data['size']) : $flat->size_sqft,
-            'owner_id' => array_key_exists('ownerId', $data) ? $data['ownerId'] : $flat->owner_id,
-            'status' => $data['status'] ?? $flat->status,
-            'monthly_rent' => $data['monthlyRent'] ?? $flat->monthly_rent,
-        ])->save();
+        if ($isOwner && isset($data['status'])) {
+            abort_unless(in_array($data['status'], ['vacant', 'maintenance'], true), 403);
+        }
+
+        DB::transaction(function () use ($flat, $data): void {
+            $nextStatus = $data['status'] ?? $flat->status;
+
+            $flat->fill([
+                'number' => $data['number'] ?? $flat->number,
+                'floor' => $data['floor'] ?? $flat->floor,
+                'size_sqft' => array_key_exists('size', $data) ? $this->extractSize($data['size']) : $flat->size_sqft,
+                'owner_id' => $data['ownerId'] ?? $flat->owner_id,
+                'status' => $nextStatus,
+                'monthly_rent' => $data['monthlyRent'] ?? $flat->monthly_rent,
+            ])->save();
+
+            if (in_array($nextStatus, ['vacant', 'maintenance'], true)) {
+                $flat->tenantProfile?->update([
+                    'flat_id' => null,
+                    'monthly_rent' => null,
+                ]);
+            }
+        });
 
         return response()->json(FrontendData::flat($flat->fresh(['owner', 'tenantProfile.user'])));
     }

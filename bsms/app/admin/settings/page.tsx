@@ -11,10 +11,11 @@ export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState('profile');
   const [profile, setProfile] = useState({ name: user?.name || '', email: user?.email || '', phone: user?.phone || '' });
   const [passwords, setPasswords] = useState({ current: '', newPw: '', confirm: '' });
-  const [notifs, setNotifs] = useState({ payments: true, maintenance: true, visitors: true, announcements: true, email: false });
+  const [notifs, setNotifs] = useState({ payments: true, maintenance: true, visitors: true, announcements: true, email: user?.emailNotifications ?? true });
 
   useEffect(() => {
     setProfile({ name: user?.name || '', email: user?.email || '', phone: user?.phone || '' });
+    setNotifs((prev) => ({ ...prev, email: user?.emailNotifications ?? true }));
   }, [user]);
 
   const handleSaveProfile = async () => {
@@ -42,6 +43,16 @@ export default function SettingsPage() {
     if (passwords.newPw.length < 8) { toast('Password too short', 'error'); return; }
     toast('Password changed successfully');
     setPasswords({ current: '', newPw: '', confirm: '' });
+  };
+
+  const handleSaveNotifications = async () => {
+    const result = await updateProfile({ emailNotifications: notifs.email });
+    if (result.success) {
+      toast('Preferences saved');
+      return;
+    }
+
+    toast(result.error || 'Failed to save preferences', 'error');
   };
 
   const tabs = [
@@ -131,7 +142,7 @@ export default function SettingsPage() {
               </div>
             ))}
             <div className="pt-2">
-              <Button onClick={() => toast('Preferences saved')}>Save Preferences</Button>
+              <Button onClick={handleSaveNotifications} disabled={isLoading}>{isLoading ? 'Saving...' : 'Save Preferences'}</Button>
             </div>
           </CardBody>
         </Card>

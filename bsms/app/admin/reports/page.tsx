@@ -1,20 +1,26 @@
 'use client';
 import { useState } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
+import { useAuthStore } from '@/lib/store/authStore';
 import { useToast } from '@/components/ToastProvider';
-import { Card, CardHeader, CardBody, Button, KPICard } from '@/components/ui';
-import { BarChart3, Download, DollarSign, Users, Wrench } from 'lucide-react';
+import { Card, CardHeader, CardBody, Button, KPICard, Modal } from '@/components/ui';
+import { BarChart3, Download, DollarSign, Users, Wrench, Sparkles } from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, LineChart, Line, Legend } from 'recharts';
 import { paymentTrends } from '@/lib/mockData';
 import { downloadPdfDocument } from '@/lib/pdf';
+import { apiRequest } from '@/lib/api/client';
 import { Payment, MaintenanceTicket, Visitor } from '@/types';
 
 export default function AdminReports() {
   const { payments, tickets, visitors, flats, tenants } = useAppStore();
+  const { token } = useAuthStore();
   const { toast } = useToast();
   const [dateFrom, setDateFrom] = useState('2025-01-01');
   const [dateTo, setDateTo] = useState('2025-12-31');
+  const [insightOpen, setInsightOpen] = useState(false);
+  const [insightLoading, setInsightLoading] = useState(false);
+  const [insight, setInsight] = useState<{ summary: string; highlights: string[]; actions: string[] } | null>(null);
 
   const inRange = (value?: string) => {
     if (!value) return false;
@@ -146,6 +152,24 @@ export default function AdminReports() {
     { name: 'Exited', value: visitors.filter(v => v.status === 'exited').length },
   ];
 
+  const getInsights = async () => {
+    if (!token) return;
+    setInsightLoading(true);
+    try {
+      const response = await apiRequest<{ summary: string; highlights: string[]; actions: string[] }>('/ai/reports/insights', {
+        method: 'POST',
+        token,
+        body: { dateFrom, dateTo },
+      });
+      setInsight(response);
+      setInsightOpen(true);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not generate AI insights', 'error');
+    } finally {
+      setInsightLoading(false);
+    }
+  };
+
   return (
     <div className="space-y-6 animate-fade-in">
       <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
@@ -153,7 +177,10 @@ export default function AdminReports() {
           <h2 className="text-xl font-bold text-slate-900 dark:text-white">Reports & Analytics</h2>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Comprehensive building society reports</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap">
+          <Button variant="outline" size="sm" icon={<Sparkles className="w-4 h-4" />} onClick={getInsights} loading={insightLoading}>
+            AI Insights
+          </Button>
           <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
           <span className="text-slate-400">to</span>
           <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 text-slate-900 dark:text-slate-100 px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -186,7 +213,7 @@ export default function AdminReports() {
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
                 <XAxis dataKey="month" tick={{ fontSize: 11, fill: '#94a3b8' }} />
                 <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} tickFormatter={v => `৳${v/1000}k`} />
-                <Tooltip formatter={(v: number) => formatCurrency(v)} contentStyle={{ borderRadius: '12px' }} />
+                <Tooltip formatter={(v) => formatCurrency(Number(v ?? 0))} contentStyle={{ borderRadius: '12px' }} />
                 <Legend />
                 <Bar dataKey="rent" name="Rent" fill="#6366f1" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="service" name="Service" fill="#10b981" radius={[4, 4, 0, 0]} />
@@ -277,6 +304,29 @@ export default function AdminReports() {
           </CardBody>
         </Card>
       </div>
+
+      <Modal open={insightOpen} onClose={() => setInsightOpen(false)} title="AI Insight Summary" size="md">
+        {insight && (
+          <div className="space-y-4">
+            <div className="rounded-xl bg-slate-50 dark:bg-slate-900/50 p-4">
+              <p className="text-sm text-slate-700 dark:text-slate-300">{insight.summary}</p>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Highlights</p>
+              <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                {insight.highlights.map((item) => <li key={item}>- {item}</li>)}
+              </ul>
+            </div>
+            <div>
+              <p className="text-sm font-semibold text-slate-900 dark:text-white mb-2">Recommended Actions</p>
+              <ul className="space-y-1 text-sm text-slate-600 dark:text-slate-400">
+                {insight.actions.map((item) => <li key={item}>- {item}</li>)}
+              </ul>
+            </div>
+            <Button variant="secondary" onClick={() => setInsightOpen(false)} className="w-full">Close</Button>
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }

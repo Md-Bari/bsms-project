@@ -14,6 +14,7 @@ export interface User {
   moveInDate?: string;
   status?: 'active' | 'inactive' | null;
   isVerified?: boolean;
+  emailNotifications?: boolean;
   createdAt: string;
 }
 
@@ -24,6 +25,8 @@ export interface Flat {
   size: string;
   ownerId?: string;
   ownerName?: string;
+  ownerEmail?: string;
+  ownerPhone?: string;
   tenantId?: string;
   tenantName?: string;
   status: 'vacant' | 'occupied' | 'maintenance';

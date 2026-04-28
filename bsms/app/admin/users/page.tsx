@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { apiRequest } from '@/lib/api/client';
 import { useAuthStore } from '@/lib/store/authStore';
+import { useAppStore } from '@/lib/store/appStore';
 import { useToast } from '@/components/ToastProvider';
 import { Badge, Button, Card, EmptyState, Input, Modal, Select, Table, Td, Th } from '@/components/ui';
 import { Flat, Role, User } from '@/types';
@@ -43,6 +44,7 @@ const roleColors: Record<Role, string> = {
 
 export default function AdminUsersPage() {
   const { token, user: currentUser } = useAuthStore();
+  const { loadAppData } = useAppStore();
   const { toast } = useToast();
   const [users, setUsers] = useState<User[]>([]);
   const [flats, setFlats] = useState<Flat[]>([]);
@@ -182,6 +184,7 @@ export default function AdminUsersPage() {
 
       setShowModal(false);
       await loadData();
+      await loadAppData();
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Failed to save user', 'error');
     } finally {
@@ -198,6 +201,7 @@ export default function AdminUsersPage() {
       setUsers((prev) => prev.filter((user) => user.id !== item.id));
       toast('User deleted successfully', 'warning');
       await loadData();
+      await loadAppData();
     } catch (error) {
       toast(error instanceof Error ? error.message : 'Failed to delete user', 'error');
     }

@@ -1,19 +1,44 @@
 'use client';
 import { useState } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
-import { Card, Badge, Table, Th, Td, EmptyState, Button } from '@/components/ui';
-import { UserCheck, Search, Clock } from 'lucide-react';
+import { useAuthStore } from '@/lib/store/authStore';
+import { useToast } from '@/components/ToastProvider';
+import { Card, Badge, Table, Th, Td, EmptyState, Button, Modal } from '@/components/ui';
+import { UserCheck, Search, Clock, Sparkles } from 'lucide-react';
 import { getStatusColor, formatDate } from '@/lib/utils';
+import { apiRequest } from '@/lib/api/client';
 
 export default function AdminVisitors() {
   const { visitors } = useAppStore();
+  const { token } = useAuthStore();
+  const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [anomalyLoading, setAnomalyLoading] = useState(false);
+  const [findings, setFindings] = useState<Array<{ severity: string; title: string; details: string }>>([]);
 
   const filtered = visitors.filter(v =>
     (typeFilter === 'all' || v.type === typeFilter) &&
     (v.name.toLowerCase().includes(search.toLowerCase()) || v.flatNumber.includes(search) || (v.tenantName || '').toLowerCase().includes(search.toLowerCase()))
   );
+
+  const analyzeAnomalies = async () => {
+    if (!token) return;
+    setAnomalyLoading(true);
+    try {
+      const response = await apiRequest<{ findings: Array<{ severity: string; title: string; details: string }> }>('/ai/visitors/anomalies', {
+        method: 'POST',
+        token,
+      });
+      setFindings(response.findings || []);
+      setAnomalyOpen(true);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Failed to analyze visitor patterns', 'error');
+    } finally {
+      setAnomalyLoading(false);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -21,6 +46,10 @@ export default function AdminVisitors() {
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">Visitor Log</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">All visitor records — walk-ins and pre-registered</p>
       </div>
+
+      <Button variant="outline" icon={<Sparkles className="w-4 h-4" />} onClick={analyzeAnomalies} loading={anomalyLoading}>
+        AI Anomaly Check
+      </Button>
 
       <div className="flex gap-2">
         {[['all', 'All'], ['expected', 'Pre-registered'], ['walkin', 'Walk-ins']].map(([val, label]) => (
@@ -74,6 +103,23 @@ export default function AdminVisitors() {
           </tbody>
         </Table>
       </Card>
+
+      <Modal open={anomalyOpen} onClose={() => setAnomalyOpen(false)} title="Visitor Anomaly Findings" size="md">
+        <div className="space-y-3">
+          {findings.map((item, index) => (
+            <div key={`${item.title}-${index}`} className="rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{item.title}</p>
+                <Badge className={item.severity === 'high' ? 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-300' : item.severity === 'medium' ? 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300' : 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'}>
+                  {item.severity}
+                </Badge>
+              </div>
+              <p className="text-sm text-slate-600 dark:text-slate-400 mt-2">{item.details}</p>
+            </div>
+          ))}
+          <Button variant="secondary" onClick={() => setAnomalyOpen(false)} className="w-full">Close</Button>
+        </div>
+      </Modal>
     </div>
   );
 }

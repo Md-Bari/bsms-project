@@ -35,4 +35,11 @@ return [
         ],
     ],
 
+    'stripe' => [
+        'key' => env('STRIPE_SECRET_KEY'),
+        'currency' => env('STRIPE_CURRENCY', 'bdt'),
+        'admin_account_id' => env('STRIPE_ADMIN_ACCOUNT_ID'),
+        'default_owner_account_id' => env('STRIPE_DEFAULT_OWNER_ACCOUNT_ID'),
+    ],
+
 ];

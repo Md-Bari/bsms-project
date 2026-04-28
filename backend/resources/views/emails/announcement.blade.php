@@ -14,6 +14,9 @@
 
         <div style="background:#ffffff; padding:24px; border:1px solid #e2e8f0; border-top:none; border-radius:0 0 20px 20px;">
             <p style="margin:0 0 16px; font-size:16px;">Hello {{ $recipient->name }},</p>
+            @if(!empty($introLine))
+                <p style="margin:0 0 16px; font-size:15px; line-height:1.7;">{{ $introLine }}</p>
+            @endif
             <p style="margin:0 0 20px; font-size:15px; line-height:1.7; white-space:pre-line;">{{ $announcement->content }}</p>
 
             <div style="background:#eef2ff; border:1px solid #c7d2fe; border-radius:14px; padding:16px; margin:24px 0;">

@@ -7,6 +7,7 @@ use App\Mail\AnnouncementMail;
 use App\Models\Announcement;
 use App\Models\Notification;
 use App\Models\User;
+use App\Support\AiOps;
 use App\Support\FrontendData;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -15,6 +16,8 @@ use Illuminate\Support\Facades\Mail;
 
 class AnnouncementController extends Controller
 {
+    public function __construct(private readonly AiOps $ai) {}
+
     public function index(): JsonResponse
     {
         return response()->json(
@@ -61,9 +64,15 @@ class AnnouncementController extends Controller
             Notification::insert($notifications);
         }
 
-        foreach ($recipients->filter(fn (User $recipient) => filled($recipient->email)) as $recipient) {
+        foreach ($recipients->filter(fn (User $recipient) => filled($recipient->email) && $recipient->email_notifications_enabled) as $recipient) {
             try {
-                Mail::to($recipient->email)->send(new AnnouncementMail($announcement, $recipient));
+                $emailTemplate = $this->ai->improveEmailTemplate('announcement', ['title' => $announcement->title]);
+                Mail::to($recipient->email)->send(new AnnouncementMail(
+                    $announcement,
+                    $recipient,
+                    $emailTemplate['subject'] ?? null,
+                    $emailTemplate['opening'] ?? null,
+                ));
             } catch (\Throwable $exception) {
                 Log::error('Failed to send announcement email.', [
                     'announcement_id' => $announcement->id,

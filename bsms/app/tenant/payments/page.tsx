@@ -1,48 +1,93 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { useAuthStore } from '@/lib/store/authStore';
 import { useToast } from '@/components/ToastProvider';
-import { Card, Badge, Button, Modal, Table, Th, Td } from '@/components/ui';
-import { CreditCard, Download, CheckCircle, AlertCircle, Building2, User } from 'lucide-react';
+import { Card, Badge, Button, Modal, Table, Th, Td, Input } from '@/components/ui';
+import { CreditCard, Download, CheckCircle, Building2, User, CalendarDays, Eye } from 'lucide-react';
 import { formatCurrency, getStatusColor, formatDate } from '@/lib/utils';
-import { Payment } from '@/types';
 import { downloadPaymentReceipt } from '@/lib/pdf';
-
-type PayMethod = 'bkash' | 'nagad' | 'card';
+import { Payment } from '@/types';
 
 export default function TenantPayments() {
-  const { payments, flats, updatePaymentStatus } = useAppStore();
+  const { payments, flats, tenants, createRentPayment, createStripeCheckoutSession, confirmStripeCheckoutSession } = useAppStore();
   const { user } = useAuthStore();
   const { toast } = useToast();
   const [payingId, setPayingId] = useState<string | null>(null);
-  const [method, setMethod] = useState<PayMethod>('bkash');
-  const [cardForm, setCardForm] = useState({ number: '', expiry: '', cvv: '', name: '' });
   const [processing, setProcessing] = useState(false);
+  const [creatingRent, setCreatingRent] = useState(false);
   const [success, setSuccess] = useState(false);
+  const [confirmingSessionId, setConfirmingSessionId] = useState<string | null>(null);
+  const [selectedMonth, setSelectedMonth] = useState(() => new Date().toISOString().slice(0, 7));
+  const [invoicePreview, setInvoicePreview] = useState<Payment | null>(null);
 
-  const myPayments = payments.filter(p => p.tenantName === user?.name);
-  const myFlat = flats.find(f => f.tenantId === user?.id);
+  const myTenantProfile = tenants.find((tenant) => tenant.userId === user?.id);
+  const myPayments = myTenantProfile ? payments.filter((payment) => payment.tenantId === myTenantProfile.id) : payments;
+  const myFlat = myTenantProfile ? flats.find(f => f.id === myTenantProfile.flatId) : flats.find(f => f.tenantId === user?.id);
   const payingPayment = payments.find(p => p.id === payingId);
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const sessionId = params.get('stripe_session_id');
+    const cancelled = params.get('payment_cancelled');
+
+    if (cancelled) {
+      toast('Stripe payment was cancelled.', 'warning');
+      window.history.replaceState({}, '', '/tenant/payments');
+      return;
+    }
+
+    if (!sessionId || confirmingSessionId === sessionId) return;
+
+    setConfirmingSessionId(sessionId);
+    confirmStripeCheckoutSession(sessionId)
+      .then((payment) => {
+        setSuccess(true);
+        toast('Stripe sandbox payment successful!');
+        downloadPaymentReceipt(payment);
+      })
+      .catch((error) => toast(error instanceof Error ? error.message : 'Could not verify Stripe payment', 'error'))
+      .finally(() => {
+        setConfirmingSessionId(null);
+        window.history.replaceState({}, '', '/tenant/payments');
+        window.setTimeout(() => setSuccess(false), 1800);
+      });
+  }, [confirmStripeCheckoutSession, confirmingSessionId, toast]);
 
   const handlePay = async () => {
     if (!payingId) return;
     setProcessing(true);
-    await new Promise(r => setTimeout(r, 2000));
-    updatePaymentStatus(payingId, 'paid', method);
-    setProcessing(false);
-    setSuccess(true);
-    await new Promise(r => setTimeout(r, 1500));
-    setSuccess(false);
-    setPayingId(null);
-    toast('Payment successful! 🎉');
+    try {
+      const checkoutUrl = await createStripeCheckoutSession(payingId);
+      window.location.href = checkoutUrl;
+    } catch (error) {
+      setProcessing(false);
+      toast(error instanceof Error ? error.message : 'Could not start Stripe checkout', 'error');
+    }
   };
 
-  const paymentMethods = [
-    { id: 'bkash', label: 'bKash', color: 'bg-pink-500', icon: '💳', desc: 'Mobile banking' },
-    { id: 'nagad', label: 'Nagad', color: 'bg-orange-500', icon: '📱', desc: 'Digital wallet' },
-    { id: 'card', label: 'Card', color: 'bg-blue-600', icon: '💳', desc: 'Credit / Debit' },
-  ];
+  const handleCreateRentPayment = async () => {
+    if (!selectedMonth) {
+      toast('Select a rent month', 'error');
+      return;
+    }
+
+    setCreatingRent(true);
+    try {
+      const payment = await createRentPayment(selectedMonth);
+      if (payment.status === 'paid') {
+        toast('Rent for this month is already paid.');
+        downloadPaymentReceipt(payment);
+        return;
+      }
+
+      setPayingId(payment.id);
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not create rent payment', 'error');
+    } finally {
+      setCreatingRent(false);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -50,6 +95,46 @@ export default function TenantPayments() {
         <h2 className="text-xl font-bold text-slate-900 dark:text-white">My Payments</h2>
         <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Manage your rent and service charge payments</p>
       </div>
+
+      <Card className="p-4">
+        <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
+          <div className="flex items-start gap-3">
+            <div className="rounded-xl bg-indigo-50 p-3 text-indigo-600 dark:bg-indigo-900/20 dark:text-indigo-300">
+              <CalendarDays className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">Pay Rent by Month</h3>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Select any billing month and pay the rent for your assigned flat.
+              </p>
+            </div>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-[180px_auto]">
+            <Input
+              label="Rent Month"
+              type="month"
+              value={selectedMonth}
+              onChange={(event) => setSelectedMonth(event.target.value)}
+            />
+            <Button
+              icon={<CreditCard className="h-4 w-4" />}
+              onClick={handleCreateRentPayment}
+              loading={creatingRent}
+              disabled={!myTenantProfile?.flatId}
+              className="sm:self-end"
+            >
+              Continue to Pay
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      {confirmingSessionId && (
+        <div className="flex items-center gap-3 p-4 bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-2xl">
+          <CheckCircle className="w-5 h-5 text-emerald-600 dark:text-emerald-400" />
+          <p className="text-sm text-emerald-800 dark:text-emerald-300">Verifying your Stripe sandbox payment...</p>
+        </div>
+      )}
 
       {/* Payment flow explanation */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -89,7 +174,7 @@ export default function TenantPayments() {
                       Due: {formatDate(p.dueDate)} · To: {p.recipient === 'owner' ? (p.ownerName || 'Owner') : 'Admin'}
                     </p>
                   </div>
-                  <Button icon={<CreditCard className="w-4 h-4" />} onClick={() => { setPayingId(p.id); setMethod('bkash'); }}>
+                  <Button icon={<CreditCard className="w-4 h-4" />} onClick={() => setPayingId(p.id)}>
                     Pay Now
                   </Button>
                 </div>
@@ -122,7 +207,26 @@ export default function TenantPayments() {
                 <Td>{p.month}</Td>
                 <Td className="capitalize">{p.method || '—'}</Td>
                 <Td><Badge className={getStatusColor(p.status)}>{p.status}</Badge></Td>
-                <Td>{p.status === 'paid' && <button onClick={() => downloadPaymentReceipt(p)} className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-500"><Download className="w-4 h-4" /></button>}</Td>
+                <Td>
+                  <div className="flex items-center gap-1.5">
+                    <button
+                      onClick={() => setInvoicePreview(p)}
+                      className="p-1.5 rounded-lg hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-indigo-500"
+                      title="View invoice"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                    {p.status === 'paid' && (
+                      <button
+                        onClick={() => downloadPaymentReceipt(p)}
+                        className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-500"
+                        title="Download receipt"
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                    )}
+                  </div>
+                </Td>
               </tr>
             ))}
           </tbody>
@@ -156,48 +260,81 @@ export default function TenantPayments() {
               </div>
             )}
 
-            <div>
-              <p className="text-sm font-medium text-slate-700 dark:text-slate-300 mb-2">Select Payment Method</p>
-              <div className="grid grid-cols-3 gap-2">
-                {paymentMethods.map(m => (
-                  <button key={m.id} onClick={() => setMethod(m.id as PayMethod)}
-                    className={`p-3 rounded-xl border-2 transition-all text-center ${method === m.id ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-slate-200 dark:border-slate-700 hover:border-slate-300'}`}>
-                    <div className={`w-8 h-8 rounded-lg ${m.color} text-white text-sm flex items-center justify-center mx-auto mb-1`}>{m.icon}</div>
-                    <p className="text-xs font-semibold text-slate-900 dark:text-white">{m.label}</p>
-                    <p className="text-xs text-slate-400">{m.desc}</p>
-                  </button>
-                ))}
-              </div>
-            </div>
-
-            {method === 'card' && (
-              <div className="space-y-3 p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl">
-                <input value={cardForm.name} onChange={e => setCardForm(p => ({ ...p, name: e.target.value }))} placeholder="Cardholder Name"
-                  className="w-full text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100" />
-                <input value={cardForm.number} onChange={e => setCardForm(p => ({ ...p, number: e.target.value }))} placeholder="Card Number (1234 5678 9012 3456)"
-                  className="w-full text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100" />
-                <div className="grid grid-cols-2 gap-2">
-                  <input value={cardForm.expiry} onChange={e => setCardForm(p => ({ ...p, expiry: e.target.value }))} placeholder="MM/YY"
-                    className="w-full text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100" />
-                  <input value={cardForm.cvv} onChange={e => setCardForm(p => ({ ...p, cvv: e.target.value }))} placeholder="CVV"
-                    className="w-full text-sm rounded-xl border border-slate-300 dark:border-slate-600 bg-white dark:bg-slate-900 px-3.5 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 text-slate-900 dark:text-slate-100" />
+            <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-2xl">
+              <div className="flex items-start gap-3">
+                <CreditCard className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-blue-800 dark:text-blue-300">Stripe Sandbox Checkout</p>
+                  <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">You will enter test card details on Stripe's secure demo page. Use card 4242 4242 4242 4242 with any future expiry and CVC.</p>
                 </div>
               </div>
-            )}
-
-            {(method === 'bkash' || method === 'nagad') && (
-              <div className="p-4 bg-slate-50 dark:bg-slate-900/50 rounded-2xl text-center">
-                <p className="text-sm text-slate-600 dark:text-slate-400">You will be redirected to</p>
-                <p className={`text-lg font-bold mt-1 ${method === 'bkash' ? 'text-pink-600' : 'text-orange-600'}`}>{method === 'bkash' ? '🩷 bKash' : '🧡 Nagad'}</p>
-                <p className="text-xs text-slate-500 mt-1">Secure mobile payment gateway</p>
-              </div>
-            )}
+            </div>
 
             <div className="flex gap-3">
               <Button variant="secondary" onClick={() => setPayingId(null)} className="flex-1" disabled={processing}>Cancel</Button>
               <Button onClick={handlePay} className="flex-1" loading={processing}>
-                {processing ? 'Processing...' : `Pay ${formatCurrency(payingPayment?.amount || 0)}`}
+                {processing ? 'Opening Stripe...' : `Pay ${formatCurrency(payingPayment?.amount || 0)}`}
               </Button>
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      <Modal open={!!invoicePreview} onClose={() => setInvoicePreview(null)} title="Invoice Preview" size="md">
+        {invoicePreview && (
+          <div className="space-y-5">
+            <div className="rounded-2xl border border-slate-200 dark:border-slate-700">
+              <div className="px-4 py-3 border-b border-slate-200 dark:border-slate-700 flex items-center justify-between">
+                <p className="text-sm font-semibold text-slate-900 dark:text-white">{invoicePreview.invoiceNumber}</p>
+                <Badge className={getStatusColor(invoicePreview.status)}>{invoicePreview.status}</Badge>
+              </div>
+              <div className="p-4 grid grid-cols-1 sm:grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-500">Type</p>
+                  <p className="font-medium text-slate-900 dark:text-white capitalize">{invoicePreview.type.replace('_', ' ')}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Amount</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{formatCurrency(invoicePreview.amount)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Billing Month</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{invoicePreview.month}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Method</p>
+                  <p className="font-medium text-slate-900 dark:text-white capitalize">{invoicePreview.method || 'N/A'}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Due Date</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{formatDate(invoicePreview.dueDate)}</p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Paid Date</p>
+                  <p className="font-medium text-slate-900 dark:text-white">
+                    {invoicePreview.paidDate ? formatDate(invoicePreview.paidDate) : 'N/A'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Recipient</p>
+                  <p className="font-medium text-slate-900 dark:text-white">
+                    {invoicePreview.recipient === 'owner' ? (invoicePreview.ownerName || 'Owner') : 'Admin (BSMS)'}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-slate-500">Flat</p>
+                  <p className="font-medium text-slate-900 dark:text-white">{invoicePreview.flatNumber}</p>
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-3">
+              <Button variant="secondary" onClick={() => setInvoicePreview(null)} className="flex-1">Close</Button>
+              {invoicePreview.status === 'paid' && (
+                <Button onClick={() => downloadPaymentReceipt(invoicePreview)} className="flex-1" icon={<Download className="w-4 h-4" />}>
+                  Download Receipt
+                </Button>
+              )}
             </div>
           </div>
         )}

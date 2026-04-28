@@ -1,18 +1,25 @@
 'use client';
 import { useState } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
+import { useAuthStore } from '@/lib/store/authStore';
+import { useToast } from '@/components/ToastProvider';
 import { Card, Badge, Table, Th, Td, EmptyState, Button, KPICard } from '@/components/ui';
-import { CreditCard, Search, Download, Eye, TrendingUp, DollarSign, AlertCircle } from 'lucide-react';
+import { CreditCard, Search, Download, Eye, TrendingUp, DollarSign, AlertCircle, Sparkles } from 'lucide-react';
 import { formatCurrency, getStatusColor, formatDate } from '@/lib/utils';
 import { Payment } from '@/types';
 import { downloadPaymentReceipt } from '@/lib/pdf';
+import { apiRequest } from '@/lib/api/client';
 
 export default function AdminPayments() {
   const { payments } = useAppStore();
+  const { token } = useAuthStore();
+  const { toast } = useToast();
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState<'all' | 'rent' | 'service_charge'>('all');
   const [statusFilter, setStatusFilter] = useState('all');
   const [viewPayment, setViewPayment] = useState<Payment | null>(null);
+  const [reminderLoading, setReminderLoading] = useState(false);
+  const [reminder, setReminder] = useState<{ subject: string; message: string; recommendedSendAt: string } | null>(null);
 
   const filtered = payments.filter(p =>
     (typeFilter === 'all' || p.type === typeFilter) &&
@@ -29,6 +36,24 @@ export default function AdminPayments() {
     service_charge: 'Service Charge',
     utility: 'Utility',
     maintenance_fee: 'Maint. Fee',
+  };
+
+  const generateReminder = async () => {
+    if (!viewPayment || !token) return;
+    setReminderLoading(true);
+    try {
+      const response = await apiRequest<{ subject: string; message: string; recommendedSendAt: string }>('/ai/payments/reminder', {
+        method: 'POST',
+        token,
+        body: { paymentId: Number(viewPayment.id), tone: viewPayment.status === 'overdue' ? 'urgent' : 'professional' },
+      });
+      setReminder(response);
+      toast('AI reminder generated');
+    } catch (error) {
+      toast(error instanceof Error ? error.message : 'Could not generate reminder', 'error');
+    } finally {
+      setReminderLoading(false);
+    }
   };
 
   return (
@@ -120,7 +145,7 @@ export default function AdminPayments() {
                 <Td><Badge className={getStatusColor(p.status)}>{p.status}</Badge></Td>
                 <Td>
                   <div className="flex items-center gap-1.5">
-                    <button onClick={() => setViewPayment(p)} className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-500 transition-colors"><Eye className="w-4 h-4" /></button>
+                    <button onClick={() => { setViewPayment(p); setReminder(null); }} className="p-1.5 rounded-lg hover:bg-blue-50 dark:hover:bg-blue-900/20 text-blue-500 transition-colors"><Eye className="w-4 h-4" /></button>
                     {p.status === 'paid' && <button onClick={() => downloadPaymentReceipt(p)} className="p-1.5 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-900/20 text-emerald-500 transition-colors"><Download className="w-4 h-4" /></button>}
                   </div>
                 </Td>
@@ -162,8 +187,24 @@ export default function AdminPayments() {
                 </div>
               ))}
             </div>
+            {viewPayment.status !== 'paid' && (
+              <div className="px-6 pb-4">
+                <Button variant="outline" icon={<Sparkles className="w-4 h-4" />} onClick={generateReminder} loading={reminderLoading} className="w-full">
+                  Generate Smart Reminder
+                </Button>
+              </div>
+            )}
+            {reminder && viewPayment.status !== 'paid' && (
+              <div className="mx-6 mb-4 rounded-xl border border-slate-200 dark:border-slate-700 p-3">
+                <p className="text-xs text-slate-500">Subject</p>
+                <p className="text-sm font-medium text-slate-900 dark:text-white">{reminder.subject}</p>
+                <p className="text-xs text-slate-500 mt-2">Message</p>
+                <p className="text-sm text-slate-700 dark:text-slate-300">{reminder.message}</p>
+                <p className="text-xs text-slate-500 mt-2">Recommended Send Time: {formatDate(reminder.recommendedSendAt)}</p>
+              </div>
+            )}
             <div className="p-6 pt-0 flex gap-3">
-              <Button variant="secondary" onClick={() => setViewPayment(null)} className="flex-1">Close</Button>
+              <Button variant="secondary" onClick={() => { setViewPayment(null); setReminder(null); }} className="flex-1">Close</Button>
               {viewPayment.status === 'paid' && <Button icon={<Download className="w-4 h-4" />} className="flex-1" onClick={() => downloadPaymentReceipt(viewPayment)}>Download Receipt</Button>}
             </div>
           </div>

@@ -1,23 +1,55 @@
 'use client';
+import { useState } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { useAuthStore } from '@/lib/store/authStore';
-import { Card, CardHeader, KPICard, Badge } from '@/components/ui';
-import { CreditCard, Wrench, UserCheck, Megaphone, AlertCircle } from 'lucide-react';
+import { Card, CardHeader, KPICard, Badge, Input, Button } from '@/components/ui';
+import { CreditCard, Wrench, UserCheck, Megaphone, AlertCircle, User, Phone, Mail } from 'lucide-react';
 import { formatCurrency, getStatusColor, formatDate } from '@/lib/utils';
 import Link from 'next/link';
+import { apiRequest } from '@/lib/api/client';
 
 export default function TenantDashboard() {
-  const { payments, tickets, visitors, announcements, flats } = useAppStore();
-  const { user } = useAuthStore();
+  const { payments, tickets, visitors, announcements, flats, tenants } = useAppStore();
+  const { user, token } = useAuthStore();
+  const [question, setQuestion] = useState('');
+  const [assistantReply, setAssistantReply] = useState('');
+  const [assistantActions, setAssistantActions] = useState<Array<{ label: string; path: string }>>([]);
+  const [asking, setAsking] = useState(false);
+  const myTenantProfile = tenants.find((tenant) => tenant.userId === user?.id);
 
-  const myPayments = payments.filter(p => p.tenantId && user && (p.tenantName === user.name));
-  const myTickets = tickets.filter(t => t.tenantId && user && t.tenantName === user.name);
-  const myVisitors = visitors.filter(v => v.tenantId === 'u3' || v.tenantName === user?.name);
+  const myPayments = myTenantProfile ? payments.filter((payment) => payment.tenantId === myTenantProfile.id) : payments;
+  const myTickets = myTenantProfile ? tickets.filter((ticket) => ticket.tenantId === myTenantProfile.id) : tickets;
+  const myVisitors = visitors.filter((visitor) => visitor.tenantId === user?.id);
   const myFlat = flats.find(f => f.tenantId === user?.id);
 
   const unpaidRent = myPayments.find(p => p.type === 'rent' && p.status !== 'paid');
   const unpaidService = myPayments.find(p => p.type === 'service_charge' && p.status !== 'paid');
   const unreadAnns = announcements.filter(a => (a.targetRole === 'all' || a.targetRole === 'tenant') && !a.readBy.includes(user?.id || '')).length;
+
+  const askAssistant = async () => {
+    if (!question.trim() || !token) return;
+
+    setAsking(true);
+    try {
+      const response = await apiRequest<{ answer: string; actions: Array<{ label: string; path: string }> }>('/ai/tenant/assistant', {
+        method: 'POST',
+        token,
+        body: {
+          question: question.trim(),
+          stats: {
+            pendingPayments: myPayments.filter(p => p.status !== 'paid').length,
+            openTickets: myTickets.filter(t => t.status !== 'resolved').length,
+            pendingVisitors: myVisitors.filter(v => v.status === 'pending').length,
+            unreadAnnouncements: unreadAnns,
+          },
+        },
+      });
+      setAssistantReply(response.answer);
+      setAssistantActions(response.actions || []);
+    } finally {
+      setAsking(false);
+    }
+  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -26,12 +58,82 @@ export default function TenantDashboard() {
         {myFlat && <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">Flat {myFlat.number} · Floor {myFlat.floor}</p>}
       </div>
 
+      {myFlat && (
+        <Card className="p-5">
+          <div className="flex items-center justify-between gap-4">
+            <div>
+              <h3 className="font-semibold text-slate-900 dark:text-white">Flat Owner Details</h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">For Flat {myFlat.number}</p>
+            </div>
+            <Badge className="bg-emerald-100 text-emerald-800 dark:bg-emerald-900/30 dark:text-emerald-400">Owner</Badge>
+          </div>
+          <div className="mt-4 grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2">
+              <p className="text-xs text-slate-500">Name</p>
+              <p className="mt-1 font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                <User className="w-4 h-4 text-slate-400" />
+                {myFlat.ownerName || 'Not available'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2">
+              <p className="text-xs text-slate-500">Phone</p>
+              <p className="mt-1 font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                <Phone className="w-4 h-4 text-slate-400" />
+                {myFlat.ownerPhone || 'Not available'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-slate-200 dark:border-slate-700 px-3 py-2">
+              <p className="text-xs text-slate-500">Email</p>
+              <p className="mt-1 font-medium text-slate-900 dark:text-white flex items-center gap-2 break-all">
+                <Mail className="w-4 h-4 text-slate-400" />
+                {myFlat.ownerEmail || 'Not available'}
+              </p>
+            </div>
+          </div>
+        </Card>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KPICard title="Pending Payments" value={myPayments.filter(p => p.status !== 'paid').length} icon={<CreditCard className="w-5 h-5" />} color={unpaidRent ? 'red' : 'emerald'} />
         <KPICard title="Open Tickets" value={myTickets.filter(t => t.status !== 'resolved').length} icon={<Wrench className="w-5 h-5" />} color="amber" />
         <KPICard title="Expected Visitors" value={myVisitors.filter(v => v.status === 'pending').length} icon={<UserCheck className="w-5 h-5" />} color="blue" />
         <KPICard title="Unread Announcements" value={unreadAnns} icon={<Megaphone className="w-5 h-5" />} color={unreadAnns > 0 ? 'indigo' : 'emerald'} />
       </div>
+
+      <Card className="p-5">
+        <div className="flex items-center justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-slate-900 dark:text-white">AI Assistant</h3>
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Ask what to do next about payments, maintenance, or visitors</p>
+          </div>
+        </div>
+        <div className="mt-4 flex flex-col sm:flex-row gap-3">
+          <Input
+            value={question}
+            onChange={(event) => setQuestion(event.target.value)}
+            placeholder="Example: I have overdue payment, what should I do first?"
+          />
+          <Button onClick={askAssistant} loading={asking} className="sm:w-36">Ask AI</Button>
+        </div>
+        {assistantReply && (
+          <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
+            <p className="text-sm text-slate-700 dark:text-slate-300">{assistantReply}</p>
+            {assistantActions.length > 0 && (
+              <div className="mt-3 flex flex-wrap gap-2">
+                {assistantActions.map((action) => (
+                  <Link
+                    key={action.path}
+                    href={action.path}
+                    className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
+                  >
+                    {action.label}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </Card>
 
       {/* Quick Pay Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
