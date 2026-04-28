@@ -1,20 +1,14 @@
 'use client';
-import { useState } from 'react';
 import { useAppStore } from '@/lib/store/appStore';
 import { useAuthStore } from '@/lib/store/authStore';
-import { Card, CardHeader, KPICard, Badge, Input, Button } from '@/components/ui';
-import { CreditCard, Wrench, UserCheck, Megaphone, AlertCircle, User, Phone, Mail } from 'lucide-react';
-import { formatCurrency, getStatusColor, formatDate } from '@/lib/utils';
+import { Card, CardHeader, KPICard, Badge, Button } from '@/components/ui';
+import { CreditCard, Wrench, UserCheck, Megaphone, User, Phone, Mail } from 'lucide-react';
+import { formatCurrency, getStatusColor } from '@/lib/utils';
 import Link from 'next/link';
-import { apiRequest } from '@/lib/api/client';
 
 export default function TenantDashboard() {
   const { payments, tickets, visitors, announcements, flats, tenants } = useAppStore();
-  const { user, token } = useAuthStore();
-  const [question, setQuestion] = useState('');
-  const [assistantReply, setAssistantReply] = useState('');
-  const [assistantActions, setAssistantActions] = useState<Array<{ label: string; path: string }>>([]);
-  const [asking, setAsking] = useState(false);
+  const { user } = useAuthStore();
   const myTenantProfile = tenants.find((tenant) => tenant.userId === user?.id);
 
   const myPayments = myTenantProfile ? payments.filter((payment) => payment.tenantId === myTenantProfile.id) : payments;
@@ -25,31 +19,6 @@ export default function TenantDashboard() {
   const unpaidRent = myPayments.find(p => p.type === 'rent' && p.status !== 'paid');
   const unpaidService = myPayments.find(p => p.type === 'service_charge' && p.status !== 'paid');
   const unreadAnns = announcements.filter(a => (a.targetRole === 'all' || a.targetRole === 'tenant') && !a.readBy.includes(user?.id || '')).length;
-
-  const askAssistant = async () => {
-    if (!question.trim() || !token) return;
-
-    setAsking(true);
-    try {
-      const response = await apiRequest<{ answer: string; actions: Array<{ label: string; path: string }> }>('/ai/tenant/assistant', {
-        method: 'POST',
-        token,
-        body: {
-          question: question.trim(),
-          stats: {
-            pendingPayments: myPayments.filter(p => p.status !== 'paid').length,
-            openTickets: myTickets.filter(t => t.status !== 'resolved').length,
-            pendingVisitors: myVisitors.filter(v => v.status === 'pending').length,
-            unreadAnnouncements: unreadAnns,
-          },
-        },
-      });
-      setAssistantReply(response.answer);
-      setAssistantActions(response.actions || []);
-    } finally {
-      setAsking(false);
-    }
-  };
 
   return (
     <div className="space-y-6 animate-fade-in">
@@ -99,41 +68,6 @@ export default function TenantDashboard() {
         <KPICard title="Expected Visitors" value={myVisitors.filter(v => v.status === 'pending').length} icon={<UserCheck className="w-5 h-5" />} color="blue" />
         <KPICard title="Unread Announcements" value={unreadAnns} icon={<Megaphone className="w-5 h-5" />} color={unreadAnns > 0 ? 'indigo' : 'emerald'} />
       </div>
-
-      <Card className="p-5">
-        <div className="flex items-center justify-between gap-4">
-          <div>
-            <h3 className="font-semibold text-slate-900 dark:text-white">AI Assistant</h3>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">Ask what to do next about payments, maintenance, or visitors</p>
-          </div>
-        </div>
-        <div className="mt-4 flex flex-col sm:flex-row gap-3">
-          <Input
-            value={question}
-            onChange={(event) => setQuestion(event.target.value)}
-            placeholder="Example: I have overdue payment, what should I do first?"
-          />
-          <Button onClick={askAssistant} loading={asking} className="sm:w-36">Ask AI</Button>
-        </div>
-        {assistantReply && (
-          <div className="mt-4 rounded-xl border border-slate-200 dark:border-slate-700 p-4">
-            <p className="text-sm text-slate-700 dark:text-slate-300">{assistantReply}</p>
-            {assistantActions.length > 0 && (
-              <div className="mt-3 flex flex-wrap gap-2">
-                {assistantActions.map((action) => (
-                  <Link
-                    key={action.path}
-                    href={action.path}
-                    className="inline-flex items-center rounded-lg bg-indigo-600 px-3 py-1.5 text-xs font-medium text-white hover:bg-indigo-700 transition-colors"
-                  >
-                    {action.label}
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-      </Card>
 
       {/* Quick Pay Actions */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
