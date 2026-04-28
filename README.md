@@ -170,18 +170,4 @@ POST   /api/payments
 * API response target < 500ms
 * Designed for horizontal scaling
 
----
 
-## Future Enhancements
-
-* AI-based maintenance classification
-* Mobile app (iOS/Android)
-* Advanced analytics dashboard
-* Multi-language support (Bangla)
-
----
-
-
-## Notes
-
-This project is designed as a foundation for a production-grade SaaS platform and aligns with real-world system design principles.
